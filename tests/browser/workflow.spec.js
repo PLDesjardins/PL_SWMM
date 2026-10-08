@@ -1,6 +1,12 @@
 const {test, expect} = require('@playwright/test');
 const path = require('path');
 
+test.beforeEach(async ({page}) => {
+  // Exercise provider selection and layer requests without consuming map-service
+  // traffic or depending on the cloud test machine's Internet allowlist.
+  await page.route('https://server.arcgisonline.com/**', route => route.fulfill({contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a8ioAAAAASUVORK5CYII=', 'base64')}));
+});
+
 test('import, real simulation, results, GIS and persistent reload', async ({page}) => {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -13,6 +19,8 @@ test('import, real simulation, results, GIS and persistent reload', async ({page
   await expect(page.locator('#import-dialog')).not.toBeVisible();
   await expect(page.locator('#model-heading')).toHaveText('riverside');
   await expect(page.locator('.leaflet-interactive')).toHaveCount(12);
+  await expect(page.locator('#layer-basemap')).toHaveValue('satellite');
+  await expect(page.locator('.leaflet-control-attribution')).toContainText('Esri');
   await page.locator('#run-button').click();
   await expect(page.locator('#run-status')).toHaveText('Completed', {timeout: 20000});
   await expect(page.locator('#stat-flow')).toContainText('CMS');
@@ -41,6 +49,29 @@ test('import, real simulation, results, GIS and persistent reload', async ({page
   await expect(page.locator('#model-heading')).toHaveText('riverside');
   expect(errors).toEqual([]);
   await page.screenshot({path: '/tmp/pl-swmm-workspace.png', fullPage: true});
+});
+
+test('PCSWMM companion CRS, missing rainfall, and attaching a new revision', async ({page}) => {
+  const fs = require('fs');
+  let text = fs.readFileSync('examples/riverside.inp', 'utf8');
+  const rain = text.split('\n').filter(l => l.startsWith('Storm ')).map(l => l.slice(6)).join('\n');
+  text = text.split('\n').filter(l => !l.startsWith('Storm ')).join('\n').replace('[TIMESERIES]', '[TIMESERIES]\nStorm FILE "C:\\PCSWMM\\rain.dat"');
+  await page.goto('/');
+  await page.locator('#open-import').click();
+  await page.locator('#model-file').setInputFiles({name: 'pcswmm.inp', mimeType: 'text/plain', buffer: Buffer.from(text)});
+  await page.locator('#companion-files').setInputFiles({name: 'pcswmm.chi', mimeType: 'text/plain', buffer: Buffer.from('[General]\nMap EPSG=4326')});
+  await page.locator('#submit-import').click();
+  await expect(page.locator('#import-dialog')).not.toBeVisible();
+  await expect(page.locator('#model-notices')).toContainText('rain.dat');
+  await expect(page.locator('#crs-label')).toContainText('EPSG:4326');
+  await expect(page.locator('#run-button')).toBeDisabled();
+  await page.locator('#attach-files').setInputFiles({name: 'rain.dat', mimeType: 'text/plain', buffer: Buffer.from(rain)});
+  await expect(page.locator('#model-notices')).not.toContainText('Attach these');
+  await expect(page.locator('#run-button')).toBeEnabled();
+  await page.locator('#run-button').click();
+  await expect(page.locator('#run-status')).toHaveText('Completed', {timeout: 20000});
+  await page.locator('#layer-basemap').selectOption('');
+  await expect(page.locator('.leaflet-control-attribution')).not.toContainText('Esri');
 });
 
 test('malformed engine input exposes report and failure state', async ({page}) => {

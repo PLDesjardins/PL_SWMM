@@ -35,6 +35,8 @@ Open `http://127.0.0.1:8000` in a local browser. Select **Explore a demo model**
 ## Features
 
 - Import and retain SWMM INP models; browse nodes, links, and subcatchments.
+- Import PCSWMM companion files (`.chi`, `.ini`, `.db`, `.thm`) together with a model, preserving the originals. Detect source CRS from matching project metadata and support Windows-1252 French text.
+- Open models with external rainfall/time-series references even when their data is missing. Attach referenced files by filename before simulation; original Windows paths are never accessed on the server. Later attachments create a new model revision and preserve previous runs.
 - Run hydrologic and hydraulic simulations in isolated subprocesses, with up to two concurrent workers and four active runs.
 - View node depth/head/inflow/flooding, link flow/depth/velocity/capacity, and subcatchment runoff/rainfall/infiltration time series.
 - Inspect the original report, including continuity errors and engine diagnostics. Download INP, RPT, OUT, engine logs, and selected time series as CSV.
@@ -42,13 +44,23 @@ Open `http://127.0.0.1:8000` in a local browser. Select **Explore a demo model**
 - Transform an explicitly supplied source CRS to WGS84 using PROJ. Export network GeoJSON and add WGS84 GeoJSON overlays.
 - Retain models and run history on the server. Reload restores the last selected model and latest run.
 
-SWMM coordinates do **not** identify their CRS. Supply an EPSG code on import for geographical maps and exports. Without a CRS, the app displays local coordinates; without coordinates, it uses a labelled schematic. GeoJSON overlays are visual reference layers for the current view; they are not persisted and do not modify the hydraulic model. The optional OpenStreetMap basemap requests `tile.openstreetmap.org` in your browser; the default map requires no external tiles.
+SWMM coordinates do **not** identify their CRS. Attach matching PCSWMM project files to detect it: explicit user entry overrides `.chi`, then `.db` Settings, then `.ini`. Conflicting metadata is reported instead of silently merged. Without a CRS, the app displays local coordinates; without coordinates, it uses a labelled schematic. GeoJSON overlays are visual references for the current view; they do not modify the hydraulic model.
+
+Geographical maps default to **Esri satellite imagery with road and place labels**, using public ArcGIS `World_Imagery`, `World_Transportation`, and `World_Boundaries_and_Places` services. No Google key is needed. The background selector also offers OpenStreetMap and **No background**. Imagery and labels load in your browser from `server.arcgisonline.com` (or `tile.openstreetmap.org` for OSM); your connection must allow those hosts. Provider attribution remains visible. Google hybrid is not included because it requires a Google Maps API key and billing-enabled project. Imagery is for geographical context, not hydraulic or elevation inputs.
+
+### Import a PCSWMM project
+
+Choose the `.inp` file and select its companion project files in the import dialog. Referenced rainfall/time-series files (`.dat`, `.txt`, etc.) can be selected at the same time. Leave the CRS field blank for detection, or enter an EPSG code to override it. Project metadata files should have the same base name as the `.inp` file.
+
+If the model references files that were not uploaded, the network still opens and the app lists the missing filenames. Use **+ Project files** to attach them; this creates a new revision rather than altering previous runs. Matching is by case-insensitive filename, so an old Windows directory does not matter. Duplicate filenames from different directories are ambiguous and require distinct names. **Project ZIP** downloads the original model and companion files for backup. This is an export; ZIP/PCZ import is not yet supported.
+
+PCSWMM `.db` files supply coordinate metadata only; historical database results are not treated as newly calculated results. Thumbnail/theme/defaults files are retained without applying proprietary PCSWMM rendering or changing model parameters. The INP download preserves original bytes; each engine run uses a UTF-8 working copy with uploaded input paths rewritten into its private assets directory.
 
 ## Current scope
 
 This is a single-user app with local and container-hosted startup options. Multi-user accounts, advanced production operations, model editing, terrain processing, shapefile import, automated network generation, calibration, scenario comparison, and coupled 1D/2D flooding are future milestones.
 
-Models must be self-contained: external `FILE` references, interface/hotstart files, and LID report paths are rejected. Use `*` for the optional LID report filename. Inputs and overlays are limited to 8 MiB. Simulations have a 120-second time limit; previews support up to 100,000 reporting periods. Large networks omit aggregate peaks above 2,000 nodes plus links or two million element-periods; individual series remain available. Summaries use **reported** elements and timestamps and cannot detect events omitted by `REPORT_STEP` or `REPORT` selections. Review the full report for numerical quality.
+External time-series, rain-gage, and temperature/climate inputs must be uploaded before simulation. Interface/hotstart directives and external LID report paths remain unsupported; use `*` for the optional LID report filename. Each uploaded file and GIS overlay is limited to 8 MiB; project uploads allow 64 companion files and 32 MiB total. Simulations have a 120-second time limit; previews support up to 100,000 reporting periods. Large networks omit aggregate peaks above 2,000 nodes plus links or two million element-periods; individual series remain available. Summaries use **reported** elements and timestamps and cannot detect events omitted by `REPORT_STEP` or `REPORT` selections. Review the full report for numerical quality.
 
 Data is stored under `.data/`, or `PL_SWMM_DATA_DIR`. Run one Uvicorn process: queue and restart handling assume a single server. Restarting marks interrupted runs as failed. No automatic file retention is implemented; back up or remove data with the server stopped. Keep the default loopback binding for local use. Hosted access needs HTTPS and a workspace password; free hosting does not retain files reliably.
 
@@ -60,11 +72,11 @@ npm run test:e2e
 PL_SWMM_E2E_HOSTED=1 npm run test:e2e
 ```
 
-API tests run real simulations and verify hydrologic output, engine version, timestamps, CSV values, artifacts, engine failures, rejected external paths, CRS transformation, and restart recovery. Browser tests exercise upload → simulation → chart/report → GIS export → reload and a failed model. They use `/usr/bin/chromium`; set `CHROMIUM_PATH` for another installed executable. Browser test data is separate under `/tmp/pl-swmm-browser-test`.
+API tests run real simulations and verify hydrologic output, engine version, timestamps, CSV values, artifacts, engine failures, safe uploaded-file resolution, CRS transformation, and restart recovery. PCSWMM tests cover companion metadata, encoding, missing files, revision creation, and equivalence of externally supplied rainfall to embedded rainfall. Browser tests exercise import → simulation → chart/report → GIS export → reload, companion attachment, and failures. Basemap tests mock tile responses while checking layer selection and attribution; they do not validate live provider imagery. They use `/usr/bin/chromium`; set `CHROMIUM_PATH` for another installed executable. Browser test data is separate under `/tmp/pl-swmm-browser-test`.
 
 ## Next milestones
 
-1. Model editing, rainfall-file packages, and persistent GIS layers.
+1. Model editing, ZIP/PCZ package import, and persistent GIS layers.
 2. Scenario copies, comparable results, and observed-series import.
 3. Calibration, sensitivity analysis, and GIS-assisted model creation.
 4. Terrain and inundation workflows with separately validated 2D capabilities.

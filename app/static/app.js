@@ -29,11 +29,12 @@ function showTab(name) {
 }
 
 function status(run) {
-  const label = run?.status || (state.model ? 'Ready to simulate' : 'No model loaded');
+  const missing = state.model?.missing_files?.length;
+  const label = run?.status || (state.model ? missing ? 'Missing input files' : 'Ready to simulate' : 'No model loaded');
   $('run-status').textContent = label.charAt(0).toUpperCase() + label.slice(1);
   $('run-status').className = 'status-badge ' + (run?.status || '');
   const busy = run && ['queued', 'running'].includes(run.status);
-  $('run-button').disabled = !state.model || busy;
+  $('run-button').disabled = !state.model || busy || missing;
   $('run-button').textContent = busy ? '◌ Simulating…' : '▶ Run simulation';
 }
 
@@ -57,6 +58,8 @@ async function loadModel(id) {
   $('model-subtitle').textContent = model.name === 'Riverside demo' ? 'Synthetic rainfall event · 6-hour simulation · Metric units' : 'Imported SWMM model · Original input preserved';
   $('empty-state').hidden = true;
   $('download-input').disabled = false;
+  $('download-bundle').disabled = false; $('attach-companions').disabled = false;
+  renderModelNotices();
   $('object-count').textContent = Object.values(model.counts).reduce((a, b) => a + b, 0) + ' objects';
   $('stat-nodes').innerHTML = `${model.counts.nodes} <small>nodes</small>`;
   $('stat-links').textContent = `${model.counts.links} links · ${model.counts.subcatchments} subcatchments`;
@@ -65,6 +68,16 @@ async function loadModel(id) {
   if (state.model?.id !== id) return;
   const latest = runs[0];
   if (latest) await selectRun(latest.id);
+}
+
+function renderModelNotices() {
+  const model = state.model;
+  const notices = [];
+  if (model.missing_files?.length) notices.push(`<strong>Model opened. Attach these rainfall/input files before simulation:</strong><ul>${model.missing_files.map(name => `<li>${escapeHTML(name)}</li>`).join('')}</ul><span>The original computer’s paths cannot be accessed by the server. Use “+ Project files” to attach the files.</span>`);
+  for (const warning of model.warnings || []) notices.push(escapeHTML(warning));
+  if (model.crs_source && model.crs_source !== 'Entered on import') notices.push(`Coordinate system detected from ${escapeHTML(model.crs_source)}: ${escapeHTML(model.crs)}.`);
+  $('model-notices').hidden = !notices.length;
+  $('model-notices').innerHTML = notices.map(n => `<div>${n}</div>`).join('');
 }
 
 function resetResults() {
@@ -119,7 +132,7 @@ function renderMap() {
   }
   for (const kind of Object.keys(state.layers)) if ($('layer-' + kind).checked) state.layers[kind].addTo(state.map);
   $('layer-basemap').disabled = !geographic;
-  if (!geographic) $('layer-basemap').checked = false;
+  $('layer-basemap').value = geographic ? localStorage.getItem('pl-swmm-basemap') ?? 'satellite' : '';
   $('export-gis').disabled = !geographic;
   $('crs-label').textContent = geographic ? `${network.crs} → WGS84` : network?.has_geometry ? 'Local coordinates · CRS unspecified' : network ? 'Schematic · No model coordinates' : 'No coordinate system';
   $('map-description').textContent = network?.has_geometry ? 'MODEL GEOMETRY' : network ? 'SCHEMATIC NETWORK' : 'MODEL GEOMETRY';
@@ -135,13 +148,25 @@ function fitMap() {
 
 function syncBasemap() {
   if (!state.map) return;
-  if ($('layer-basemap').checked && state.model?.network.map_mode === 'geographic') {
-    if (!state.basemap) {
-      state.basemap = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 19, attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'});
-      state.basemap.on('tileerror', () => {if (!syncBasemap.warned) {toast('Basemap tiles are unavailable. Model geometry still works without a basemap.'); syncBasemap.warned = true;}});
-    }
-    state.basemap.addTo(state.map);
-  } else if (state.basemap) state.map.removeLayer(state.basemap);
+  if (state.basemap) state.map.removeLayer(state.basemap);
+  state.basemap = null;
+  const choice = $('layer-basemap').value;
+  if (!choice || state.model?.network.map_mode !== 'geographic') return;
+  const tile = (url, options) => {
+    const layer = L.tileLayer(url, options);
+    layer.on('tileerror', () => {if (!syncBasemap.warned) {toast('Background imagery is unavailable on this connection. Model geometry still works; select No background to hide tiles.'); syncBasemap.warned = true;}});
+    return layer;
+  };
+  if (choice === 'satellite') {
+    const service = 'https://server.arcgisonline.com/ArcGIS/rest/services/';
+    const image = tile(service + 'World_Imagery/MapServer/tile/{z}/{y}/{x}', {maxZoom: 20, maxNativeZoom: 19, attribution: 'Imagery © <a href="https://www.esri.com/">Esri</a>, Maxar, Earthstar Geographics, GIS User Community'});
+    const labels = tile(service + 'Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {maxZoom: 20, maxNativeZoom: 19, attribution: 'Labels © Esri, HERE, Garmin, FAO, NOAA, USGS'});
+    const roads = tile(service + 'Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', {maxZoom: 20, maxNativeZoom: 19, attribution: 'Roads © Esri, HERE, Garmin'});
+    state.basemap = L.layerGroup([image, roads, labels]);
+  } else {
+    state.basemap = tile('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 20, maxNativeZoom: 19, attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'});
+  }
+  state.basemap.addTo(state.map);
 }
 
 function colourMap() {
@@ -298,8 +323,9 @@ function bindEvents() {
     event.preventDefault(); $('submit-import').disabled = true; $('import-error').hidden = true;
     try {
       const body = new FormData(); body.append('file', $('model-file').files[0]); body.append('crs', $('model-crs').value);
+      for (const file of $('companion-files').files) body.append('companions', file);
       const model = await api('/api/models', {method: 'POST', body});
-      await refreshModels(); await loadModel(model.id); $('import-dialog').close(); toast('Model imported. Ready to run with EPA SWMM 5.2.4.');
+      await refreshModels(); await loadModel(model.id); $('import-dialog').close(); toast(model.missing_files?.length ? 'Model opened. Attach the listed input files before running.' : 'Model imported. Ready to run with EPA SWMM 5.2.4.');
     } catch (error) {$('import-error').textContent = error.message; $('import-error').hidden = false;}
     finally {$('submit-import').disabled = false;}
   });
@@ -327,13 +353,27 @@ function bindEvents() {
       else layer.unbindTooltip();
     }));
   });
-  $('layer-basemap').addEventListener('change', syncBasemap);
+  $('layer-basemap').addEventListener('change', () => {localStorage.setItem('pl-swmm-basemap', $('layer-basemap').value); syncBasemap();});
   $('fit-map').addEventListener('click', fitMap);
   $('map-theme').addEventListener('change', () => {
     if ($('map-theme').value === 'flow' && !Object.keys(state.run?.summary?.link_peaks || {}).length) {toast('Peak-flow colouring requires a completed run with a network summary.'); $('map-theme').value = 'network';}
     colourMap();
   });
   $('download-input').addEventListener('click', () => download(`/api/models/${state.model.id}/input`));
+  $('download-bundle').addEventListener('click', () => download(`/api/models/${state.model.id}/bundle`));
+  $('attach-companions').addEventListener('click', () => $('attach-files').click());
+  $('attach-files').addEventListener('change', attempt(async event => {
+    const files = event.target.files;
+    if (!files.length || !state.model) return;
+    const id = state.model.id;
+    const body = new FormData(); for (const file of files) body.append('companions', file);
+    $('attach-companions').disabled = true;
+    try {
+      const model = await api(`/api/models/${id}/companions`, {method: 'POST', body});
+      if (state.model?.id === id) {await refreshModels(); await loadModel(model.id);}
+      toast('Project files added as a new model revision. Previous models and runs are retained.');
+    } finally {event.target.value = ''; $('attach-companions').disabled = !state.model;}
+  }));
   $('export-gis').addEventListener('click', () => {if (state.model) download(`/api/models/${state.model.id}/geojson`);});
   $('result-kind').addEventListener('change', attempt(async () => {updateResultOptions(); await loadSeries();}));
   for (const id of ['result-element', 'result-metric']) $(id).addEventListener('change', attempt(loadSeries));

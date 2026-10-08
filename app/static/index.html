@@ -26,14 +26,15 @@
       <label class="layer-row"><input type="checkbox" id="layer-links" checked><span class="layer-swatch conduit"></span>Links</label>
       <label class="layer-row"><input type="checkbox" id="layer-nodes" checked><span class="layer-swatch node"></span>Nodes</label>
       <label class="layer-row"><input type="checkbox" id="layer-labels" checked>Object labels</label>
-      <label class="layer-row"><input type="checkbox" id="layer-basemap">OpenStreetMap basemap</label>
+      <label class="field-label" for="layer-basemap">Background imagery</label><select id="layer-basemap" aria-label="Map background"><option value="satellite">Satellite + labels (Esri)</option><option value="osm">OpenStreetMap</option><option value="">No background</option></select>
       <button class="button text-button" id="gis-import">+ Add GeoJSON overlay</button><input type="file" id="gis-file" accept=".geojson,.json" hidden>
       <div id="overlay-list"></div>
       <div class="run-history"><div class="section-heading">SIMULATION RUNS <span id="run-count">0</span></div><div id="run-list"><p class="muted small">Your runs will appear here.</p></div></div>
       <div class="sidebar-footer"><span class="status-dot"></span><span id="connection-status">Connecting to engine</span><span>v0.1</span></div>
     </aside>
     <main>
-      <div class="main-heading"><div><div class="eyebrow">STORMWATER MODELLING</div><h1 id="model-heading">Your drainage network</h1><p id="model-subtitle">An open workspace for models, maps, and simulation results.</p></div><button class="button subtle" id="download-input" disabled>↓ Model INP</button></div>
+      <div class="main-heading"><div><div class="eyebrow">STORMWATER MODELLING</div><h1 id="model-heading">Your drainage network</h1><p id="model-subtitle">An open workspace for models, maps, and simulation results.</p></div><div class="model-actions"><button class="button subtle" id="attach-companions" disabled>+ Project files</button><button class="button subtle" id="download-bundle" disabled>↓ Project ZIP</button><button class="button subtle" id="download-input" disabled>↓ Model INP</button></div></div>
+      <input type="file" id="attach-files" multiple hidden><div id="model-notices" class="model-notices" hidden></div>
       <div class="stats-grid">
         <div class="stat"><span>NETWORK</span><strong id="stat-nodes">— <small>nodes</small></strong><div id="stat-links">Import a model to begin</div></div>
         <div class="stat"><span>PEAK LINK FLOW</span><strong id="stat-flow">—</strong><div>Maximum absolute reported flow</div></div>
@@ -54,7 +55,7 @@
       <div class="workspace-note"><span>EPA SWMM 5.2.4 · Hydrology + hydraulic routing</span><span>Server workspace · Files stored on server</span></div>
     </main>
   </div>
-  <dialog id="import-dialog"><form id="import-form"><div class="dialog-heading"><div><div class="eyebrow">NEW MODEL</div><h2>Import a SWMM model</h2></div><button type="button" class="icon-button" id="close-import" aria-label="Close import">×</button></div><p class="muted">Upload a complete .inp file with embedded time series. External file references are not supported yet.</p><label class="drop-zone">↑<strong>Choose your .inp file</strong><input type="file" id="model-file" accept=".inp" required><span>Up to 8 MiB</span></label><label class="field-label" for="model-crs">Source coordinate reference system <span>Optional</span></label><input id="model-crs" placeholder="e.g. EPSG:26918 or EPSG:4326"><p class="muted small">SWMM does not store a CRS. Enter the system used by your model coordinates to enable basemaps and WGS84 GeoJSON export. Leave blank for a local-coordinate view.</p><div id="import-error" class="inline-error" role="alert" hidden></div><button class="button primary full" id="submit-import">Import model</button></form></dialog>
+  <dialog id="import-dialog"><form id="import-form"><div class="dialog-heading"><div><div class="eyebrow">NEW MODEL</div><h2>Import a SWMM model</h2></div><button type="button" class="icon-button" id="close-import" aria-label="Close import">×</button></div><p class="muted">Select your .inp model. Add PCSWMM companion files to detect its coordinate system, and rainfall/time-series files to run it. You can attach missing files later.</p><label class="drop-zone">↑<strong>Choose your .inp file</strong><input type="file" id="model-file" accept=".inp" required><span>Up to 8 MiB per file</span></label><label class="field-label" for="companion-files">Project and rainfall files <span>Optional</span></label><input type="file" id="companion-files" multiple><p class="muted small">Add .chi, .ini, .db, .thm, and referenced .dat/.txt files. Up to 64 companions and 32 MiB total.</p><label class="field-label" for="model-crs">Source coordinate reference system <span>Optional</span></label><input id="model-crs" placeholder="e.g. EPSG:26918 or EPSG:4326"><p class="muted small">Leave blank to detect the CRS from matching PCSWMM .chi, .db, or .ini files. Enter an EPSG code to override it. Without metadata or an override, coordinates remain local.</p><div id="import-error" class="inline-error" role="alert" hidden></div><button class="button primary full" id="submit-import">Import model</button></form></dialog>
   <div id="toast" class="toast" role="status" hidden></div>
 </body>
 </html>

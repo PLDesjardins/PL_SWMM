@@ -46,7 +46,7 @@ def tokenize(line):
     return tokens
 
 
-def parse_model(text: str, crs: str | None = None) -> dict:
+def parse_model(text: str, crs: str | None = None, *, allow_external: bool = False) -> dict:
     if any(ord(c) < 32 and c not in '\t\r\n' for c in text) or re.search(r'\r(?!\n)', text):
         raise ValueError("Model input contains unsupported control characters.")
     sections = defaultdict(list)
@@ -69,7 +69,7 @@ def parse_model(text: str, crs: str | None = None) -> dict:
                     section == "RAINGAGES" and len(tokens) > 4 and tokens[4].upper().startswith("FILE") or
                     section == "TIMESERIES" and len(tokens) > 1 and tokens[1].upper() == "FILE" or
                     section in {"TEMPERATURE", "EVAPORATION", "BACKDROP"} and tokens and tokens[0].upper().startswith("FILE"))
-        if external:
+        if external and (not allow_external or section == "FILES"):
             raise ValueError("External FILE references are unsupported. Embed rainfall and time series in the INP file.")
         if section == "LID_USAGE" and len(tokens) > 8 and tokens[8] != "*":
             raise ValueError("External LID report paths are unsupported. Omit the report filename or replace it with *.")

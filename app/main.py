@@ -10,6 +10,7 @@ import shutil
 import secrets
 import sys
 import uuid
+import zipfile
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,10 +22,12 @@ from swmm.toolkit import solver
 
 from app.model import as_geojson, parse_model
 from app.results import series
+from app.importing import basename, decode_text, detect_crs, prepare_model
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = Path(os.environ.get("PL_SWMM_DATA_DIR", ROOT / ".data"))
 MAX_UPLOAD = 8 * 1024 * 1024
+MAX_BUNDLE = 32 * 1024 * 1024
 slots = asyncio.Semaphore(2)
 
 
@@ -107,16 +110,33 @@ def health():
     return {"status": "ok", "engine": "5.2.4", "engine_code": solver.swmm_get_version()}
 
 
-def add_model(text, name, crs):
+def add_model(text, name, crs, *, original=None, supplied_files=None):
+    supplied_files = supplied_files or {}
     try:
-        network = parse_model(text, crs)
+        crs, crs_source, warnings = detect_crs(name, supplied_files, crs)
+        network = parse_model(text, crs, allow_external=True)
+        prepared, assets, missing = prepare_model(text, supplied_files)
     except Exception as exc:
         raise HTTPException(422, str(exc)) from exc
     identifier = uuid.uuid4().hex
     path = DATA / "models" / identifier
     path.mkdir(parents=True)
-    (path / "model.inp").write_text(text)
+    (path / "model.inp").write_bytes(original if original is not None else text.encode('utf-8'))
+    (path / "prepared.inp").write_text(prepared, encoding='utf-8')
+    for relative, data in assets.items():
+        target = path / relative
+        target.parent.mkdir(exist_ok=True)
+        target.write_bytes(data)
+    companions = []
+    for filename, data in supplied_files.items():
+        stored = 'companions/' + uuid.uuid4().hex
+        target = path / stored
+        target.parent.mkdir(exist_ok=True)
+        target.write_bytes(data)
+        companions.append({'name': filename, 'stored': stored})
     meta = {"id": identifier, "name": name[:150], "created_at": now(), "crs": crs,
+            "crs_source": crs_source, "warnings": warnings, "missing_files": missing, "can_run": not missing,
+            "companions": companions, "source_encoding": decode_text(original)[1] if original else 'UTF-8',
             "counts": {kind: len(network[kind]) for kind in ["nodes", "links", "subcatchments"]}}
     save_json(path / "network.json", network)
     save_json(path / "meta.json", meta)
@@ -129,17 +149,60 @@ def models():
 
 
 @app.post("/api/models", status_code=201)
-async def upload_model(file: UploadFile = File(...), crs: str = Form("")):
+async def upload_model(file: UploadFile = File(...), crs: str = Form(""), companions: list[UploadFile] = File(default=[])):
     if not (file.filename or "").lower().endswith(".inp"):
         raise HTTPException(422, "Choose a SWMM .inp file.")
     data = await file.read(MAX_UPLOAD + 1)
     if len(data) > MAX_UPLOAD:
         raise HTTPException(413, "Model exceeds the 8 MiB upload limit.")
     try:
-        text = data.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        text = data.decode("cp1252")
-    return add_model(text, Path(file.filename).name, crs.strip() or None)
+        name = basename(file.filename)
+        text, _ = decode_text(data)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    supplied = await read_companions(companions, len(data), model_name=name)
+    return add_model(text, name, crs.strip() or None, original=data, supplied_files=supplied)
+
+
+async def read_companions(uploads, total=0, *, model_name=None):
+    if len(uploads) > 64:
+        raise HTTPException(413, 'Attach up to 64 companion files at once.')
+    files = {}
+    used = {model_name.casefold()} if model_name else set()
+    for upload in uploads:
+        try:
+            name = basename(upload.filename or '')
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        if name.casefold() in used:
+            raise HTTPException(422, 'Uploaded filenames must be unique, ignoring case: ' + name)
+        used.add(name.casefold())
+        data = await upload.read(MAX_UPLOAD + 1)
+        total += len(data)
+        if len(data) > MAX_UPLOAD or total > MAX_BUNDLE:
+            raise HTTPException(413, 'Each file must be at most 8 MiB; total upload at most 32 MiB.')
+        files[name] = data
+    return files
+
+
+@app.post('/api/models/{identifier}/companions')
+async def attach_companions(identifier: str, companions: list[UploadFile] = File(...)):
+    source = folder('models', identifier)
+    current = json.loads((source / 'meta.json').read_text())
+    added = await read_companions(companions, model_name=current['name'])
+    retained = {item['name']: (source / item['stored']).read_bytes() for item in current.get('companions', [])}
+    # Import a new revision; prior runs and original model remain reproducible.
+    added_names = {name.casefold() for name in added}
+    retained = {name: data for name, data in retained.items() if name.casefold() not in added_names}
+    retained.update(added)
+    if len(retained) > 64:
+        raise HTTPException(413, 'A project can contain up to 64 companion files.')
+    if sum(map(len, retained.values())) + (source / 'model.inp').stat().st_size > MAX_BUNDLE:
+        raise HTTPException(413, 'Combined project exceeds 32 MiB.')
+    original = (source / 'model.inp').read_bytes()
+    text, _ = decode_text(original)
+    explicit_crs = current['crs'] if current.get('crs_source') == 'Entered on import' else None
+    return add_model(text, current['name'], explicit_crs, original=original, supplied_files=retained)
 
 
 @app.post("/api/models/demo", status_code=201)
@@ -156,6 +219,19 @@ def model(identifier: str):
 @app.get("/api/models/{identifier}/input")
 def model_input(identifier: str):
     return FileResponse(folder("models", identifier) / "model.inp", filename="model.inp", media_type="text/plain")
+
+
+@app.get('/api/models/{identifier}/bundle')
+def model_bundle(identifier: str):
+    source = folder('models', identifier)
+    meta = json.loads((source / 'meta.json').read_text())
+    content = io.BytesIO()
+    with zipfile.ZipFile(content, 'w', zipfile.ZIP_DEFLATED) as bundle:
+        name = basename(meta['name'])
+        bundle.write(source / 'model.inp', name if name.lower().endswith('.inp') else name + '.inp')
+        for item in meta.get('companions', []):
+            bundle.write(source / item['stored'], item['name'])
+    return Response(content.getvalue(), media_type='application/zip', headers={'Content-Disposition': 'attachment; filename="project.zip"'})
 
 
 @app.get("/api/models/{identifier}/geojson")
@@ -202,13 +278,18 @@ async def execute_run(path):
 @app.post("/api/models/{identifier}/runs", status_code=202)
 async def start_run(identifier: str, tasks: BackgroundTasks):
     source = folder("models", identifier)
+    meta_source = json.loads((source / 'meta.json').read_text())
+    if meta_source.get('missing_files'):
+        raise HTTPException(422, 'Attach missing input files before simulating: ' + ', '.join(meta_source['missing_files']))
     active = [p for p in (DATA / "runs").glob("*/meta.json") if json.loads(p.read_text())["status"] in {"queued", "running"}]
     if len(active) >= 4:
         raise HTTPException(429, "Four runs are already active. Wait for a run to finish.")
     run_id = uuid.uuid4().hex
     path = DATA / "runs" / run_id
     path.mkdir()
-    shutil.copyfile(source / "model.inp", path / "model.inp")
+    shutil.copyfile(source / "prepared.inp" if (source / "prepared.inp").exists() else source / "model.inp", path / "model.inp")
+    if (source / 'assets').is_dir():
+        shutil.copytree(source / 'assets', path / 'assets')
     meta = {"id": run_id, "model_id": identifier, "status": "queued", "created_at": now()}
     save_json(path / "meta.json", meta)
     tasks.add_task(execute_run, path)

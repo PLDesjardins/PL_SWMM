@@ -93,14 +93,24 @@ def test_external_paths_and_oversized_inputs_rejected(client):
     '[FILES] trailing text\nUSE HOTSTART "/etc/passwd"',
     '[TITLE]\n"[FILES]"\nSAVE OUTFLOWS "/tmp/unsafe.txt"',
     '[LID_USAGE]\nS1 L1 1 100 10 0 0 0 "/tmp/unsafe.txt"',
+])
+def test_external_writes_and_interface_files_are_rejected(client, addition):
+    response = client.post("/api/models", files={"file": ("unsafe.inp", DEMO.read_text() + '\n' + addition)})
+    assert response.status_code == 422
+    assert "unsupported" in response.json()["detail"]
+
+
+@pytest.mark.parametrize('addition', [
     '[TEMPERATURE]\nFILE "/etc/passwd"',
     '[RAINGAGES]\nRG2 INTENSITY 0:05 1.0 FILE "/etc/passwd" STA MM',
     '[TIMESERIES]\nRain FILE "/etc/passwd"',
 ])
-def test_all_engine_external_file_routes_are_rejected(client, addition):
-    response = client.post("/api/models", files={"file": ("unsafe.inp", DEMO.read_text() + '\n' + addition)})
-    assert response.status_code == 422
-    assert "unsupported" in response.json()["detail"]
+def test_external_reads_require_uploaded_assets_not_server_paths(client, addition):
+    response = client.post('/api/models', files={'file': ('unsafe.inp', DEMO.read_text() + '\n' + addition)})
+    assert response.status_code == 201
+    model = response.json()
+    assert model['missing_files'] == ['passwd']
+    assert client.post(f"/api/models/{model['id']}/runs").status_code == 422
 
 
 def test_projected_gis_coordinates_are_transformed():
