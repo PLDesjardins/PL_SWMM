@@ -1,0 +1,8 @@
+{
+  "name": "pl-swmm-ui",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {"test:e2e": "playwright test"},
+  "dependencies": {"leaflet": "1.9.4"},
+  "devDependencies": {"@playwright/test": "1.64.0"}
+}

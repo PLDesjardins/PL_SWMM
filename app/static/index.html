@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>PL SWMM · Stormwater workspace</title>
+  <link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/vendor/leaflet/leaflet.js" defer></script>
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="PL SWMM home"><span class="brand-mark">≋</span> PL<span>SWMM</span></a>
+    <div class="breadcrumb">Workspace <span>/</span> <strong id="project-title">New project</strong></div>
+    <div class="top-actions"><span class="engine"><i></i> EPA SWMM <b id="engine-version">Checking…</b></span><button class="button subtle" id="open-import">↑ Import model</button><button class="button primary" id="run-button" disabled>▶ Run simulation</button></div>
+  </header>
+  <div class="workspace">
+    <aside class="sidebar">
+      <div class="sidebar-heading"><span>PROJECT</span><span class="tiny-label">LOCAL</span></div>
+      <label class="sr-only" for="model-select">Saved model</label><select id="model-select"><option value="">Select a model</option></select>
+      <div class="section-heading">MODEL EXPLORER <span id="object-count">0 objects</span></div>
+      <input class="search" id="object-search" placeholder="Search network…" aria-label="Search network objects">
+      <div id="model-tree" class="model-tree"><p class="muted small">Import a model to explore its network.</p></div>
+      <div class="section-heading layers-heading">MAP LAYERS</div>
+      <label class="layer-row"><input type="checkbox" id="layer-subcatchments" checked><span class="layer-swatch catchment"></span>Subcatchments</label>
+      <label class="layer-row"><input type="checkbox" id="layer-links" checked><span class="layer-swatch conduit"></span>Links</label>
+      <label class="layer-row"><input type="checkbox" id="layer-nodes" checked><span class="layer-swatch node"></span>Nodes</label>
+      <label class="layer-row"><input type="checkbox" id="layer-labels" checked>Object labels</label>
+      <label class="layer-row"><input type="checkbox" id="layer-basemap">OpenStreetMap basemap</label>
+      <button class="button text-button" id="gis-import">+ Add GeoJSON overlay</button><input type="file" id="gis-file" accept=".geojson,.json" hidden>
+      <div id="overlay-list"></div>
+      <div class="run-history"><div class="section-heading">SIMULATION RUNS <span id="run-count">0</span></div><div id="run-list"><p class="muted small">Your runs will appear here.</p></div></div>
+      <div class="sidebar-footer"><span class="status-dot"></span><span id="connection-status">Connecting to engine</span><span>v0.1</span></div>
+    </aside>
+    <main>
+      <div class="main-heading"><div><div class="eyebrow">STORMWATER MODELLING</div><h1 id="model-heading">Your drainage network</h1><p id="model-subtitle">An open workspace for models, maps, and simulation results.</p></div><button class="button subtle" id="download-input" disabled>↓ Model INP</button></div>
+      <div class="stats-grid">
+        <div class="stat"><span>NETWORK</span><strong id="stat-nodes">— <small>nodes</small></strong><div id="stat-links">Import a model to begin</div></div>
+        <div class="stat"><span>PEAK LINK FLOW</span><strong id="stat-flow">—</strong><div>Maximum absolute reported flow</div></div>
+        <div class="stat"><span>PEAK NODE DEPTH</span><strong id="stat-depth">—</strong><div>Maximum reported water depth</div></div>
+        <div class="stat"><span>NODES WITH FLOODING</span><strong id="stat-flood">—</strong><div id="stat-run">No completed simulation</div></div>
+      </div>
+      <section class="workbench">
+        <nav class="tabs" aria-label="Workspace view"><button class="tab active" data-tab="network">◇ Network map</button><button class="tab" data-tab="results">⌁ Results</button><button class="tab" data-tab="report">≡ Engine report</button><span id="run-status" class="status-badge">No model loaded</span></nav>
+        <div id="network-panel" class="tab-panel">
+          <div class="map-toolbar"><span id="map-description">MODEL GEOMETRY</span><div><label class="small" for="map-theme">Colour by</label> <select id="map-theme"><option value="network">Object type</option><option value="flow">Peak link flow</option></select><button class="icon-button" id="fit-map" aria-label="Fit network to map" title="Fit network">⛶</button><button class="icon-button" id="export-gis" aria-label="Export network GeoJSON" title="Export WGS84 GeoJSON">↓</button></div></div>
+          <div class="map-layout"><div id="map" aria-label="Drainage network map"></div><aside class="inspector"><div class="section-heading">OBJECT INSPECTOR</div><div id="inspector-content"><div class="inspector-icon">◇</div><h3>Explore the network</h3><p class="muted small">Select a node, link, or subcatchment to inspect its properties and results.</p></div></aside></div>
+          <div class="map-footer"><span><i class="legend-dot"></i>Node <i class="legend-line"></i>Link <i class="legend-area"></i>Subcatchment</span><span id="crs-label">No coordinate system</span></div>
+          <div class="empty-map" id="empty-state"><span class="empty-icon">≋</span><h2>Bring your network to life</h2><p>Run an EPA SWMM model and explore the water<br>moving through your drainage network.</p><button class="button primary" id="load-demo">Explore a demo model ↗</button><button class="button text-button" id="empty-import">or import your own .inp file</button><small>Synthetic example · No engineering design claims</small></div>
+        </div>
+        <div id="results-panel" class="tab-panel" hidden><div class="panel-intro"><h2>Simulation results</h2><p class="muted">Time series from the SWMM binary output. Times use the model’s clock.</p></div><div id="results-empty" class="panel-empty">Run a simulation to explore results.</div><div id="results-content" hidden><div class="result-controls"><label>Category<select id="result-kind"><option value="links">Links</option><option value="nodes">Nodes</option><option value="subcatchments">Subcatchments</option></select></label><label>Object<select id="result-element"></select></label><label>Metric<select id="result-metric"></select></label><button class="button subtle" id="export-csv">↓ Export CSV</button></div><div class="chart-head"><div><h3 id="chart-title">Flow rate</h3><p id="chart-subtitle" class="muted small"></p></div><strong id="chart-peak"></strong></div><div id="chart" class="chart" aria-label="Simulation time series chart"></div><div class="artifact-row"><span id="period-count" class="muted small"></span><div><button class="button subtle" id="download-report">↓ Report (.rpt)</button><button class="button subtle" id="download-output">↓ Binary output (.out)</button></div></div></div></div>
+        <div id="report-panel" class="tab-panel" hidden><div class="panel-intro report-heading"><div><h2>Engine report</h2><p class="muted">Original SWMM report, including continuity errors and model diagnostics.</p></div><button class="button subtle" id="download-log" disabled>↓ Engine log</button></div><pre id="report-text">Run a simulation to generate the engine report.</pre></div>
+      </section>
+      <div class="workspace-note"><span>EPA SWMM 5.2.4 · Hydrology + hydraulic routing</span><span>Local workspace · Files stay on your server</span></div>
+    </main>
+  </div>
+  <dialog id="import-dialog"><form id="import-form"><div class="dialog-heading"><div><div class="eyebrow">NEW MODEL</div><h2>Import a SWMM model</h2></div><button type="button" class="icon-button" id="close-import" aria-label="Close import">×</button></div><p class="muted">Upload a complete .inp file with embedded time series. External file references are not supported yet.</p><label class="drop-zone">↑<strong>Choose your .inp file</strong><input type="file" id="model-file" accept=".inp" required><span>Up to 8 MiB</span></label><label class="field-label" for="model-crs">Source coordinate reference system <span>Optional</span></label><input id="model-crs" placeholder="e.g. EPSG:26918 or EPSG:4326"><p class="muted small">SWMM does not store a CRS. Enter the system used by your model coordinates to enable basemaps and WGS84 GeoJSON export. Leave blank for a local-coordinate view.</p><div id="import-error" class="inline-error" role="alert" hidden></div><button class="button primary full" id="submit-import">Import model</button></form></dialog>
+  <div id="toast" class="toast" role="status" hidden></div>
+</body>
+</html>
