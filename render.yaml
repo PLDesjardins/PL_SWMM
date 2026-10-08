@@ -1,0 +1,17 @@
+# Browser-only setup at https://render.com/deploy?repo=https://github.com/PLDesjardins/PL_SWMM
+# No software is installed on the user's PC. Free service storage is ephemeral.
+services:
+  - type: web
+    name: pl-swmm
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    autoDeploy: false
+    envVars:
+      - key: PL_SWMM_REQUIRE_AUTH
+        value: "1"
+      - key: PL_SWMM_PASSWORD
+        sync: false
+      - key: PL_SWMM_DATA_DIR
+        value: /var/data/pl-swmm

@@ -1,17 +1,20 @@
 import asyncio
+import base64
+import binascii
 import csv
 import io
 import json
 import os
 import re
 import shutil
+import secrets
 import sys
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from swmm.toolkit import solver
@@ -46,6 +49,8 @@ def folder(category, identifier):
 
 @asynccontextmanager
 async def lifespan(app):
+    if os.environ.get("PL_SWMM_REQUIRE_AUTH") == "1" and not os.environ.get("PL_SWMM_PASSWORD"):
+        raise RuntimeError("Hosted mode requires PL_SWMM_PASSWORD. Set it in your hosting dashboard.")
     if solver.swmm_get_version() != 52004:
         raise RuntimeError("Wrong engine installed: expected EPA SWMM 5.2.4 (52004).")
     for name in ["models", "runs"]:
@@ -59,6 +64,35 @@ async def lifespan(app):
 
 
 app = FastAPI(title="PL SWMM", version="0.1.0", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def protect_hosted_workspace(request: Request, call_next):
+    # Health checks stay public. Everything else, including files and docs,
+    # is protected when a password is set. Local use remains unchanged.
+    password = os.environ.get("PL_SWMM_PASSWORD", "")
+    required = os.environ.get("PL_SWMM_REQUIRE_AUTH") == "1"
+    if request.url.path == "/api/health" and request.method in {"GET", "HEAD"}:
+        return await call_next(request)
+    if password or required:
+        authorized = False
+        try:
+            scheme, encoded = request.headers.get("authorization", "").split(" ", 1)
+            if scheme.lower() == "basic" and password:
+                credentials = base64.b64decode(encoded, validate=True)
+                expected = ("swmm:" + password).encode("utf-8")
+                authorized = secrets.compare_digest(credentials, expected)
+        except (ValueError, binascii.Error):
+            pass
+        if not authorized:
+            return Response("Sign in with username swmm and your workspace password.", status_code=401,
+                            headers={"WWW-Authenticate": 'Basic realm="PL SWMM workspace", charset="UTF-8"', "Cache-Control": "no-store"})
+    response = await call_next(request)
+    if password or required:
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 app.mount("/static", StaticFiles(directory=ROOT / "app/static"), name="static")
 app.mount("/vendor/leaflet", StaticFiles(directory=ROOT / "node_modules/leaflet/dist", check_dir=False), name="leaflet")
 
