@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/static/style.css">
   <script src="/vendor/leaflet/leaflet.js" defer></script>
   <script src="/static/app.js" defer></script>
+  <script src="/static/editor.js" defer></script>
 </head>
 <body>
   <header class="topbar">
@@ -42,7 +43,8 @@
         <div class="stat"><span>NODES WITH FLOODING</span><strong id="stat-flood">—</strong><div id="stat-run">No completed simulation</div></div>
       </div>
       <section class="workbench">
-        <nav class="tabs" aria-label="Workspace view"><button class="tab active" data-tab="network">◇ Network map</button><button class="tab" data-tab="results">⌁ Results</button><button class="tab" data-tab="report">≡ Engine report</button><span id="run-status" class="status-badge">No model loaded</span></nav>
+        <nav class="tabs" aria-label="Workspace view"><button class="tab active" data-tab="network">◇ Network map</button><button class="tab" data-tab="data">✎ Model data</button><button class="tab" data-tab="results">⌁ Results</button><button class="tab" data-tab="report">≡ Engine report</button><span id="run-status" class="status-badge">No model loaded</span></nav>
+        <div id="data-panel" class="tab-panel" hidden><div class="panel-intro"><h2>Model data</h2><p class="muted">Edit object parameters, time series, and curves. Units follow the model’s options. Saving creates a new revision; run it to calculate new results.</p><div class="data-actions"><button class="button subtle" id="add-series">+ Add time series</button><button class="button subtle" id="add-curve">+ Add curve</button></div></div><div class="result-controls"><label>Section<select id="data-section"></select></label><label>Search<input id="data-search" placeholder="Search names…"></label></div><div id="data-list" class="data-list">Import a model to edit its data.</div></div>
         <div id="network-panel" class="tab-panel">
           <div class="map-toolbar"><span id="map-description">MODEL GEOMETRY</span><div><label class="small" for="map-theme">Colour by</label> <select id="map-theme"><option value="network">Object type</option><option value="flow">Peak link flow</option></select><button class="icon-button" id="fit-map" aria-label="Fit network to map" title="Fit network">⛶</button><button class="icon-button" id="export-gis" aria-label="Export network GeoJSON" title="Export WGS84 GeoJSON">↓</button></div></div>
           <div class="map-layout"><div id="map" aria-label="Drainage network map"></div><aside class="inspector"><div class="section-heading">OBJECT INSPECTOR</div><div id="inspector-content"><div class="inspector-icon">◇</div><h3>Explore the network</h3><p class="muted small">Select a node, link, or subcatchment to inspect its properties and results.</p></div></aside></div>
@@ -56,6 +58,7 @@
     </main>
   </div>
   <dialog id="import-dialog"><form id="import-form"><div class="dialog-heading"><div><div class="eyebrow">NEW MODEL</div><h2>Import a SWMM model</h2></div><button type="button" class="icon-button" id="close-import" aria-label="Close import">×</button></div><p class="muted">Select your .inp model. Add PCSWMM companion files to detect its coordinate system, and rainfall/time-series files to run it. You can attach missing files later.</p><label class="drop-zone">↑<strong>Choose your .inp file</strong><input type="file" id="model-file" accept=".inp" required><span>Up to 8 MiB per file</span></label><label class="field-label" for="companion-files">Project and rainfall files <span>Optional</span></label><input type="file" id="companion-files" multiple><p class="muted small">Add .chi, .ini, .db, .thm, and referenced .dat/.txt files. Up to 64 companions and 32 MiB total.</p><label class="field-label" for="model-crs">Source coordinate reference system <span>Optional</span></label><input id="model-crs" placeholder="e.g. EPSG:26918 or EPSG:4326"><p class="muted small">Leave blank to detect the CRS from matching PCSWMM .chi, .db, or .ini files. Enter an EPSG code to override it. Without metadata or an override, coordinates remain local.</p><div id="import-error" class="inline-error" role="alert" hidden></div><button class="button primary full" id="submit-import">Import model</button></form></dialog>
+  <dialog id="edit-dialog" class="edit-dialog"><form id="edit-form"><div class="dialog-heading"><div><div class="eyebrow" id="edit-section-title">MODEL DATA</div><h2 id="edit-title">Edit parameters</h2></div><button type="button" class="icon-button" id="close-edit" aria-label="Close editor">×</button></div><p class="muted small">Use the original model units. Object names stay fixed to preserve references. Optional trailing fields may be omitted. Cancel discards unsaved edits.</p><label class="field-label" for="edit-name">Name</label><input id="edit-name" maxlength="31" required><div id="edit-fields"></div><div id="edit-error" class="inline-error" role="alert" hidden></div><div class="edit-footer"><button type="button" class="button subtle" id="cancel-edit">Cancel</button><button class="button primary" id="save-edit">Save new revision</button></div></form></dialog>
   <div id="toast" class="toast" role="status" hidden></div>
 </body>
 </html>

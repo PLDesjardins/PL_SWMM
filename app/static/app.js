@@ -24,8 +24,9 @@ function attempt(fn) { return async (...args) => {try {await fn(...args);} catch
 function download(url) { const a = document.createElement('a'); a.href = url; a.download = ''; a.click(); }
 function showTab(name) {
   document.querySelectorAll('.tab').forEach(tab => tab.classList.toggle('active', tab.dataset.tab === name));
-  ['network', 'results', 'report'].forEach(n => $(n + '-panel').hidden = n !== name);
+  ['network', 'data', 'results', 'report'].forEach(n => $(n + '-panel').hidden = n !== name);
   if (name === 'network') setTimeout(() => state.map?.invalidateSize(), 0);
+  if (name === 'data') attempt(refreshEditor)();
 }
 
 function status(run) {
@@ -40,7 +41,7 @@ function status(run) {
 
 async function refreshModels() {
   const models = await api('/api/models');
-  $('model-select').innerHTML = '<option value="">Select a model</option>' + models.map(m => `<option value="${m.id}">${escapeHTML(m.name)}</option>`).join('');
+  $('model-select').innerHTML = '<option value="">Select a model</option>' + models.map(m => `<option value="${m.id}">${escapeHTML(m.name)}${m.revision ? ' · revision ' + m.revision : ''}</option>`).join('');
   $('model-select').value = state.model?.id || '';
   return models;
 }
@@ -76,6 +77,7 @@ function renderModelNotices() {
   if (model.missing_files?.length) notices.push(`<strong>Model opened. Attach these rainfall/input files before simulation:</strong><ul>${model.missing_files.map(name => `<li>${escapeHTML(name)}</li>`).join('')}</ul><span>The original computer’s paths cannot be accessed by the server. Use “+ Project files” to attach the files.</span>`);
   for (const warning of model.warnings || []) notices.push(escapeHTML(warning));
   if (model.crs_source && model.crs_source !== 'Entered on import') notices.push(`Coordinate system detected from ${escapeHTML(model.crs_source)}: ${escapeHTML(model.crs)}.`);
+  if (model.edit_validation === 'pending_missing_files') notices.push('Edits saved. SWMM input validation is pending until the missing input files are attached.');
   $('model-notices').hidden = !notices.length;
   $('model-notices').innerHTML = notices.map(n => `<div>${n}</div>`).join('');
 }
@@ -197,10 +199,14 @@ function renderInspector() {
   }
   const obj = state.model.network[selected.kind].find(o => o.id === selected.id);
   const labels = {junction: ['Invert elevation', 'Max depth', 'Initial depth', 'Surcharge depth', 'Ponded area'], outfall: ['Invert elevation', 'Boundary type', 'Flap gate'], storage: ['Invert elevation', 'Max depth', 'Initial depth', 'Shape'], conduit: ['Length', 'Roughness', 'Inlet offset', 'Outlet offset', 'Initial flow', 'Max flow'], subcatchment: ['Rain gage', 'Outlet', 'Area', 'Impervious (%)', 'Width', 'Slope (%)', 'Curb length']};
+  if (obj.kind === 'outfall' && !['FREE', 'NORMAL'].includes(obj.parameters[1]?.toUpperCase())) labels.outfall = ['Invert elevation', 'Boundary type', 'Stage / curve / time series', 'Flap gate', 'Route to subcatchment'];
   const properties = [];
   if (obj.from) properties.push(['From node', obj.from], ['To node', obj.to]);
   obj.parameters.forEach((v, i) => properties.push([(labels[obj.kind] || [])[i] || `Parameter ${i + 1}`, v]));
   $('inspector-content').innerHTML = `<div class="inspector-icon">${selected.kind === 'nodes' ? '●' : selected.kind === 'links' ? '↗' : '◇'}</div><h3>${escapeHTML(obj.id)}</h3><span class="object-type">${escapeHTML(obj.kind)}</span><div class="property-list">${properties.map(([k, v]) => `<div class="property-row"><span>${escapeHTML(k)}</span><strong>${escapeHTML(v)}</strong></div>`).join('')}</div><p class="muted small" style="margin-top:12px">Raw INP parameters · Units follow FLOW_UNITS and model options.</p><button class="button subtle" id="inspect-results" ${state.run?.status === 'completed' ? '' : 'disabled'}>⌁ View time series</button>`;
+  const editButton = document.createElement('button'); editButton.className = 'button primary full'; editButton.id = 'inspect-edit'; editButton.textContent = '✎ Edit parameters';
+  $('inspector-content').append(editButton);
+  editButton.addEventListener('click', attempt(() => editNetworkObject(obj)));
   $('inspect-results').addEventListener('click', attempt(async () => {
     if (!state.run.summary.elements[selected.kind].includes(selected.id)) {toast('This object is excluded from the model’s REPORT selections.'); return;}
     $('result-kind').value = selected.kind; updateResultOptions(selected.id); showTab('results'); await loadSeries();

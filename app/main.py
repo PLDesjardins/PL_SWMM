@@ -19,10 +19,12 @@ from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from swmm.toolkit import solver
+from pydantic import BaseModel, Field
 
 from app.model import as_geojson, parse_model
 from app.results import series
 from app.importing import basename, decode_text, detect_crs, prepare_model
+from app import editing
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = Path(os.environ.get("PL_SWMM_DATA_DIR", ROOT / ".data"))
@@ -219,6 +221,46 @@ def model(identifier: str):
 @app.get("/api/models/{identifier}/input")
 def model_input(identifier: str):
     return FileResponse(folder("models", identifier) / "model.inp", filename="model.inp", media_type="text/plain")
+
+
+class ModelChange(BaseModel):
+    section: str
+    id: str = Field(min_length=1, max_length=31)
+    rows: list[list[str]] = Field(max_length=100000)
+    create: bool = False
+
+
+class ModelEdits(BaseModel):
+    changes: list[ModelChange] = Field(min_length=1, max_length=100)
+
+
+@app.get('/api/models/{identifier}/editor')
+def model_editor(identifier: str, section: str | None = None, item: str | None = None):
+    text, _ = decode_text((folder('models', identifier) / 'model.inp').read_bytes())
+    try:
+        return editing.detail(text, section, item) if section and item else editing.catalog(text)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.post('/api/models/{identifier}/edits', status_code=201)
+def save_edits(identifier: str, payload: ModelEdits):
+    source = folder('models', identifier)
+    meta = json.loads((source / 'meta.json').read_text())
+    text, _ = decode_text((source / 'model.inp').read_bytes())
+    companions = {entry['name']: (source / entry['stored']).read_bytes() for entry in meta.get('companions', [])}
+    try:
+        edited = editing.edit(text, payload.changes)
+        if len(edited.encode('utf-8')) > MAX_UPLOAD or len(edited.encode('utf-8')) + sum(map(len, companions.values())) > MAX_BUNDLE:
+            raise HTTPException(413, 'Edited project exceeds the model/project size limits.')
+        validation = editing.validate(edited, meta.get('crs'), companions, ROOT)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    explicit = meta.get('crs') if meta.get('crs_source') == 'Entered on import' else None
+    revision = add_model(edited, meta['name'], explicit, supplied_files=companions)
+    revision.update(parent_id=identifier, revision=meta.get('revision', 0) + 1, edit_validation=validation)
+    save_json(DATA / 'models' / revision['id'] / 'meta.json', {k: v for k, v in revision.items() if k != 'network'})
+    return revision
 
 
 @app.get('/api/models/{identifier}/bundle')
